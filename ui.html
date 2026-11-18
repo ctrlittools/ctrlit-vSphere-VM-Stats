@@ -1,0 +1,423 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Ctrlit vSphere VM Stats</title>
+<style>
+  :root {
+    --surface: #1a1a19; --raised: #222221; --line: #33332f; --text: #f0efec; --sec: #c3c2b7; --muted: #929187;
+    --vs: #3987e5; --g: #d95926; --warn: #e0a64a; --ok: #0ca30c; --field: #121211;
+    color-scheme: dark;
+  }
+  html, body { margin: 0; background: var(--surface); overflow: hidden; }
+  body { color: var(--text); font: 12px/1.4 "Segoe UI", system-ui, sans-serif; font-variant-numeric: tabular-nums; user-select: none; }
+  .panel { width: 600px; max-height: 100vh; overflow: auto; border: 1px solid var(--line); box-sizing: border-box; }
+  .settings .panel { width: 520px; }
+  .hidden { display: none !important; }
+  .head { display: flex; align-items: flex-start; gap: 10px; padding: 12px 12px 10px 14px; border-bottom: 1px solid var(--line); cursor: move; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; margin-top: 5px; flex: none; background: var(--muted); }
+  .dot.on { background: var(--ok); }
+  .title { flex: 1; min-width: 0; }
+  .name { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sub { color: var(--sec); margin-top: 2px; }
+  .close { all: unset; cursor: pointer; font-size: 20px; line-height: 18px; width: 22px; height: 22px; text-align: center; border-radius: 5px; color: var(--sec); }
+  .close:hover { background: var(--raised); color: var(--text); }
+  .grid { display: grid; grid-template-columns: 58px 1fr 1fr; gap: 6px 14px; padding: 12px 14px 4px; }
+  .colhead { font-weight: 600; display: flex; align-items: baseline; gap: 6px; }
+  .colhead span { font-weight: 400; color: var(--muted); }
+  .sw { display: inline-block; width: 10px; height: 3px; border-radius: 2px; transform: translateY(-3px); }
+  .sw.vs { background: var(--vs); } .sw.g { background: var(--g); }
+  .rowlabel { color: var(--sec); font-weight: 600; padding-top: 4px; }
+  .cell { background: var(--raised); border-radius: 8px; padding: 7px 9px 4px; min-width: 0; }
+  .val { font-size: 19px; font-weight: 600; line-height: 1.15; }
+  .subv { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 15px; }
+  svg.spark { display: block; width: 100%; height: auto; margin-top: 3px; overflow: visible; }
+  .grid-l { stroke: var(--line); stroke-dasharray: 2 3; }
+  .base { stroke: #4a4a45; }
+  .ax { fill: var(--muted); font-size: 9px; }
+  .line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .vs .line { stroke: var(--vs); } .g .line { stroke: var(--g); }
+  .area { opacity: .14; } .vs .area { fill: var(--vs); } .g .area { fill: var(--g); }
+  .end, .hdot { stroke: var(--raised); stroke-width: 2; }
+  .vs .end, .vs .hdot { fill: var(--vs); } .g .end, .g .hdot { fill: var(--g); }
+  .xh { stroke: var(--sec); stroke-width: 1; }
+  .hit { fill: transparent; }
+  .notice { margin: 8px 14px 0; padding: 8px 10px; border-radius: 8px; background: #2a2418; border: 1px solid #4d3f22; }
+  .notice b { color: var(--warn); }
+  .hint { color: var(--sec); margin-top: 4px; }
+  .section { padding: 10px 14px 4px; }
+  .sechead { font-weight: 600; margin-bottom: 6px; }
+  .sechead span { font-weight: 400; color: var(--muted); margin-left: 6px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { color: var(--muted); font-weight: 400; text-align: right; padding: 3px 6px; border-bottom: 1px solid var(--line); }
+  td { text-align: right; padding: 3px 6px; border-bottom: 1px solid #262624; white-space: nowrap; }
+  tr:last-child td { border-bottom: none; }
+  .l { text-align: left; } .n { color: var(--muted); width: 16px; }
+  .pname { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+  .cpu { display: flex; align-items: center; gap: 8px; }
+  .bar { width: 90px; height: 6px; background: #2c2c2a; border-radius: 3px; overflow: hidden; flex: none; }
+  .bar i { display: block; height: 100%; background: var(--g); border-radius: 0 3px 3px 0; min-width: 2px; }
+  .cpu span { min-width: 44px; text-align: right; }
+  .empty { padding: 18px 14px; color: var(--sec); }
+  .empty.small { padding: 6px 0 8px; }
+  .foot { padding: 8px 14px 10px; color: var(--muted); font-size: 11px; border-top: 1px solid var(--line); margin-top: 6px; }
+  .tip { position: fixed; display: none; pointer-events: none; background: #f0efec; color: #0b0b0b; padding: 3px 7px; border-radius: 5px; font-size: 11px; white-space: nowrap; z-index: 2; }
+
+  /* settings */
+  form { padding: 4px 18px 16px; user-select: text; }
+  .intro { color: var(--sec); padding: 12px 18px 0; }
+  .intro kbd { background: var(--raised); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; font: inherit; color: var(--text); }
+  fieldset { border: none; margin: 14px 0 0; padding: 0; }
+  legend { font-weight: 600; font-size: 13px; padding: 0; margin-bottom: 8px; }
+  label.f { display: grid; grid-template-columns: 110px 1fr; align-items: center; gap: 10px; margin: 6px 0; color: var(--sec); }
+  input[type=text], input[type=password] { background: var(--field); color: var(--text); border: 1px solid #44443f; border-radius: 6px; padding: 6px 8px; font: inherit; outline: none; }
+  input[type=text]:focus, input[type=password]:focus { border-color: var(--vs); }
+  input:disabled { opacity: .45; }
+  label.c { display: flex; align-items: center; gap: 8px; margin: 6px 0; color: var(--text); }
+  label.c small { color: var(--muted); }
+  input[type=checkbox], input[type=radio] { accent-color: var(--vs); margin: 0; }
+  .indent { margin-left: 22px; }
+  .status { min-height: 18px; margin-top: 14px; color: var(--sec); }
+  .status.err { color: #e66767; } .status.ok { color: #3ec43e; }
+  .buttons { display: flex; gap: 8px; margin-top: 10px; align-items: center; }
+  .buttons .spacer { flex: 1; }
+  button.b { font: inherit; border-radius: 6px; padding: 6px 14px; border: 1px solid #44443f; background: var(--raised); color: var(--text); cursor: pointer; }
+  button.b:hover { border-color: #5c5c56; }
+  button.b.primary { background: #2a63b8; border-color: #2a63b8; color: #fff; }
+  button.b.primary:hover { background: #3170cc; }
+  button.b:disabled { opacity: .5; cursor: default; }
+  button.link { all: unset; color: var(--muted); cursor: pointer; text-decoration: underline; }
+
+  /* about (light, like a standard Windows dialog) */
+  html.about, html.about body { background: #fff; }
+  html.about body { color: #1a1a1a; }
+  .about .panel { width: 640px; border: 1px solid #b9b9b9; background: #fff; }
+  .atitle { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 0 0 10px; cursor: default; font-size: 12px; color: #1a1a1a; }
+  .atitle img { width: 16px; height: 16px; }
+  .atitle span { flex: 1; }
+  .aclose { all: unset; width: 46px; height: 32px; text-align: center; font-size: 14px; color: #1a1a1a; cursor: default; }
+  .aclose:hover { background: #c42b1c; color: #fff; }
+  .abody { padding: 10px 16px 18px 16px; }
+  .atop { display: grid; grid-template-columns: 48px 1fr auto; gap: 16px; align-items: start; }
+  .atop img.big { width: 48px; height: 48px; }
+  .aname { font-size: 17px; font-weight: 700; margin-top: 2px; }
+  .aname .ver { margin-left: 14px; }
+  .alic { margin-top: 2px; }
+  .aok { font: inherit; min-width: 96px; padding: 4px 12px; margin-top: 2px; background: #fdfdfd; color: #1a1a1a; border: 1px solid #0067c0; border-radius: 4px; outline: 1px solid #0067c0; outline-offset: -2px; cursor: default; }
+  .aok:hover { background: #e5f1fb; }
+  .agrid { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 26px 0 0 0; }
+  .agrid .al { text-align: right; color: #1a1a1a; }
+  .agrid a { color: #0067c0; text-decoration: underline; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .agrid a:hover { color: #003e92; }
+</style></head>
+<body>
+<div class="panel" id="panel"></div>
+<div class="tip" id="tip"></div>
+<script>
+(() => {
+  'use strict';
+  const WINDOW_MS = 5 * 60 * 1000;
+  const SW = 248, SH = 60, PT = 6, PB = 46;
+  const panel = document.getElementById('panel');
+  const tip = document.getElementById('tip');
+  let mode = '';
+  let charts = {};
+  let lastSize = '';
+
+  const cmd = (o) => { try { return window.vhCmd(o); } catch (e) { return Promise.resolve(); } };
+
+  function reportSize() {
+    requestAnimationFrame(() => {
+      const w = Math.ceil(panel.offsetWidth), h = Math.ceil(panel.scrollHeight + 2);
+      const key = `${mode}:${w}x${h}`;
+      cmd({ op: 'size', w, h, first: key !== lastSize });
+      lastSize = key;
+    });
+  }
+  window.addEventListener('resize', () => { lastSize = ''; reportSize(); });
+
+  // ---------------------------------------------------------------- formatting
+  const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const fmtPct = (v) => `${(+v).toFixed(1)}%`;
+  const fmtGB = (mb) => (mb == null ? '–' : `${(mb / 1024).toFixed(mb >= 10240 ? 0 : 1)} GB`);
+  const fmtMB = (mb) => (mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : mb < 1 ? '<1 MB' : `${Math.round(mb)} MB`);
+  const fmtNum = (n) => (n == null ? '–' : Number(n).toLocaleString());
+  const fmtTime = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  function fmtRate(kbps) {
+    if (kbps >= 1024) return `${(kbps / 1024).toFixed(kbps >= 10240 ? 0 : 1)} MB/s`;
+    return `${kbps >= 10 ? Math.round(kbps) : (+kbps).toFixed(1)} KB/s`;
+  }
+  function niceMax(v) {
+    const p = Math.pow(10, Math.floor(Math.log10(v)));
+    for (const m of [1, 2, 5, 10]) if (m * p >= v) return m * p;
+    return 10 * p;
+  }
+  const last = (a) => (a && a.length ? a[a.length - 1] : null);
+  const powerLabel = (p) => ({ poweredOn: 'Powered on', poweredOff: 'Powered off', suspended: 'Suspended' }[p] || p || '');
+
+  // ---------------------------------------------------------------- popup
+  function renderPopup(s) {
+    document.body.className = 'popup'; document.documentElement.className = 'popup';
+    charts = {};
+    tip.style.display = 'none';
+    let html = head(s);
+    html += grid(s, Date.now());
+    if (s.vsError) html += notice('vSphere stats unavailable.', s.vsError);
+    if (s.guestError) html += notice('Guest data unavailable.', s.guestError.message, s.guestError.hint);
+    html += processes(s);
+    html += `<div class="foot">${s.updated ? `Updated ${fmtTime(s.updated)} · ` : ''}Esc or click elsewhere to close · Ctrl+Shift over another VM to switch</div>`;
+    panel.innerHTML = html;
+    reportSize();
+  }
+
+  function head(s) {
+    const vm = s.vm;
+    const bits = [];
+    if (vm) {
+      if (vm.powerState && vm.powerState !== 'poweredOn') bits.push(powerLabel(vm.powerState));
+      if (vm.host) bits.push(esc(vm.host));
+      if (vm.numCpu) bits.push(`${vm.numCpu} vCPU`);
+      if (vm.memoryMB) bits.push(fmtGB(vm.memoryMB));
+      if (vm.guestOS) bits.push(esc(vm.guestOS));
+      if (vm.ip) bits.push(esc(vm.ip));
+      if (vm.duplicates > 0) bits.push(`${vm.duplicates + 1} VMs share this name – showing the first`);
+    }
+    const p = vm ? vm.powerState : '';
+    const dot = p === 'poweredOn' ? 'on' : '';
+    return `<div class="head" data-drag="1">
+      <span class="dot ${dot}" title="${esc(powerLabel(p))}"></span>
+      <div class="title"><div class="name">${esc(vm ? vm.name : s.name)}</div>
+      <div class="sub">${bits.join(' · ') || 'Loading…'}</div></div>
+      <button class="close" data-close="1" title="Close (Esc)" aria-label="Close">×</button></div>`;
+  }
+
+  function grid(s, now) {
+    const vs = s.vs, g = s.guest;
+    const gh = g ? g.history || [] : [];
+    const inWin = (p) => p.t >= now - WINDOW_MS - 20000;
+    const ser = {
+      cpu: { vs: vs ? vs.cpu : [], g: gh.map((h) => ({ t: h.t, v: h.cpu })) },
+      mem: { vs: vs ? vs.mem : [], g: gh.map((h) => ({ t: h.t, v: h.mem })) },
+      net: { vs: vs ? vs.net : [], g: gh.map((h) => ({ t: h.t, v: h.net })) },
+    };
+    const netMax = niceMax(Math.max(10, ...ser.net.vs.filter(inWin).map((p) => p.v), ...ser.net.g.filter(inWin).map((p) => p.v)));
+    const ready = vs ? last(vs.ready) : null;
+    const rows = [
+      { key: 'cpu', label: 'CPU', yMax: 100, fmt: fmtPct,
+        vsSub: vs ? `${fmtNum(vs.cpuMHz)} MHz · ready ${ready ? ready.v.toFixed(1) : '–'}%` : '',
+        gSub: g ? `${g.logicalProcs} logical CPUs` : '' },
+      { key: 'mem', label: 'Memory', yMax: 100, fmt: fmtPct,
+        vsSub: vs ? `active ${fmtGB(vs.activeMB)} · consumed ${fmtGB(vs.consumedMB)}` : '',
+        gSub: g ? `in use ${fmtGB(g.usedMB)} of ${fmtGB(g.totalMB)}` : '' },
+      { key: 'net', label: 'Network', yMax: netMax, fmt: fmtRate, vsSub: vs ? 'all vNICs' : '', gSub: g ? 'all adapters' : '' },
+    ];
+    const vsState = vs ? 'ok' : s.vsError ? 'err' : 'load';
+    const gState = g ? 'ok' : s.guestError ? 'err' : 'load';
+    let h = `<div class="grid"><div></div>
+      <div class="colhead"><i class="sw vs"></i>vSphere <span>host view · 20 s samples</span></div>
+      <div class="colhead"><i class="sw g"></i>Guest <span>Windows view · 5 s samples</span></div>`;
+    for (const r of rows) {
+      h += `<div class="rowlabel">${r.label}</div>`;
+      h += cell(`vs-${r.key}`, 'vs', ser[r.key].vs || [], r, r.vsSub, vsState, now);
+      h += cell(`g-${r.key}`, 'g', ser[r.key].g, r, r.gSub, gState, now);
+    }
+    return `${h}</div>`;
+  }
+
+  function cell(id, cls, points, row, sub, st, now) {
+    const lp = last(points);
+    const value = st === 'load' ? '…' : lp ? row.fmt(lp.v) : '–';
+    const subText = st === 'err' ? 'unavailable' : st === 'load' ? 'loading…' : sub;
+    return `<div class="cell"><div class="val">${value}</div><div class="subv">${esc(subText)}</div>${spark(id, cls, points, row, now)}</div>`;
+  }
+
+  function spark(id, cls, points, row, now) {
+    const x0 = now - WINDOW_MS;
+    const sx = (t) => 4 + ((Math.min(Math.max(t, x0), now) - x0) / WINDOW_MS) * (SW - 8);
+    const sy = (v) => PB - (Math.min(Math.max(v, 0), row.yMax) / row.yMax) * (PB - PT);
+    const pts = points.filter((p) => p.t >= x0 - 20000).map((p) => ({ x: sx(p.t), y: sy(p.v), t: p.t, v: p.v }));
+    charts[id] = { pts, fmt: row.fmt };
+    let marks = '';
+    if (pts.length > 1) {
+      const line = pts.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join('');
+      marks += `<path class="area" d="${line}L${pts[pts.length - 1].x.toFixed(1)},${PB}L${pts[0].x.toFixed(1)},${PB}Z"/>`;
+      marks += `<path class="line" d="${line}"/>`;
+    }
+    if (pts.length) {
+      const p = pts[pts.length - 1];
+      marks += `<circle class="end" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4"/>`;
+    }
+    const axisMax = row.key === 'net' ? fmtRate(row.yMax) : '100%';
+    return `<svg class="spark ${cls}" data-id="${id}" viewBox="0 0 ${SW} ${SH}" aria-hidden="true">
+      <line class="grid-l" x1="0" x2="${SW}" y1="${PT}" y2="${PT}"/>
+      <line class="grid-l" x1="0" x2="${SW}" y1="${(PT + PB) / 2}" y2="${(PT + PB) / 2}"/>
+      <line class="base" x1="0" x2="${SW}" y1="${PB}" y2="${PB}"/>
+      <text class="ax" x="2" y="${PT + 10}">${axisMax}</text>
+      <text class="ax" x="2" y="${SH - 2}">−5 min</text>
+      <text class="ax" x="${SW - 2}" y="${SH - 2}" text-anchor="end">now</text>
+      ${marks}
+      <g class="hover" style="display:none"><line class="xh" y1="${PT}" y2="${PB}"/><circle class="hdot" r="4"/></g>
+      <rect class="hit" x="0" y="0" width="${SW}" height="${SH}"/></svg>`;
+  }
+
+  function notice(title, message, hint) {
+    return `<div class="notice"><b>${esc(title)}</b> ${esc(message)}${hint ? `<div class="hint">${esc(hint)}</div>` : ''}</div>`;
+  }
+
+  function processes(s) {
+    const g = s.guest;
+    let body;
+    if (!g) {
+      body = `<div class="empty small">${s.guestError ? 'The process list needs the guest connection.' : 'Loading processes…'}</div>`;
+    } else if (!g.top || !g.top.length) {
+      body = '<div class="empty small">No processes reported.</div>';
+    } else {
+      body = `<table><thead><tr><th class="n">#</th><th class="l">Process</th><th>PID</th><th class="l">CPU</th><th>Memory</th></tr></thead><tbody>${
+        g.top.map((p, i) => `<tr><td class="n">${i + 1}</td><td class="l pname" title="${esc(p.name)}">${esc(p.name)}</td><td>${p.pid}</td>
+          <td class="l"><div class="cpu"><div class="bar"><i style="width:${Math.min(100, p.cpu).toFixed(1)}%"></i></div><span>${fmtPct(p.cpu)}</span></div></td>
+          <td>${fmtMB(p.memMB)}</td></tr>`).join('')}</tbody></table>`;
+    }
+    const meta = g ? `by CPU, high to low · ${g.processCount} running · via ${esc(g.target)}` : 'by CPU, high to low';
+    return `<div class="section"><div class="sechead">Top 10 Windows processes <span>${meta}</span></div>${body}</div>`;
+  }
+
+  // chart hover
+  panel.addEventListener('mousemove', (e) => {
+    const svg = e.target.closest && e.target.closest('svg.spark');
+    panel.querySelectorAll('svg.spark .hover').forEach((g) => { if (g.ownerSVGElement !== svg) g.style.display = 'none'; });
+    if (!svg) { tip.style.display = 'none'; return; }
+    const c = charts[svg.dataset.id];
+    if (!c || !c.pts.length) { tip.style.display = 'none'; return; }
+    const r = svg.getBoundingClientRect();
+    const x = (e.clientX - r.left) * (SW / r.width);
+    let best = c.pts[0];
+    for (const p of c.pts) if (Math.abs(p.x - x) < Math.abs(best.x - x)) best = p;
+    const g = svg.querySelector('.hover');
+    g.style.display = '';
+    g.querySelector('.xh').setAttribute('x1', best.x);
+    g.querySelector('.xh').setAttribute('x2', best.x);
+    g.querySelector('.hdot').setAttribute('cx', best.x);
+    g.querySelector('.hdot').setAttribute('cy', best.y);
+    tip.innerHTML = `<b>${c.fmt(best.v)}</b> ${fmtTime(best.t)}`;
+    tip.style.display = 'block';
+    const px = r.left + best.x * (r.width / SW), py = r.top + best.y * (r.height / SH);
+    tip.style.left = `${Math.max(4, Math.min(px + 10, window.innerWidth - tip.offsetWidth - 6))}px`;
+    tip.style.top = `${Math.max(4, py - tip.offsetHeight - 8)}px`;
+  });
+  panel.addEventListener('mouseleave', () => {
+    tip.style.display = 'none';
+    panel.querySelectorAll('svg.spark .hover').forEach((g) => { g.style.display = 'none'; });
+  });
+
+  // ---------------------------------------------------------------- settings
+  function renderSettings(d) {
+    document.body.className = 'settings'; document.documentElement.className = 'settings';
+    const c = d.config || {};
+    panel.innerHTML = `
+      <div class="head" data-drag="1"><div class="title"><div class="name">Ctrlit vSphere VM Stats – Settings</div>
+        <div class="sub">Version ${esc(d.version || '')}</div></div>
+        <button class="close" data-close="1" title="Close" aria-label="Close">×</button></div>
+      <div class="intro">Hover over a VM's name – in the vSphere Client or anywhere else on screen – and press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>.</div>
+      <form id="f" autocomplete="off">
+        <fieldset><legend>vCenter</legend>
+          <label class="f">Server <input type="text" name="server" placeholder="vcsa.yourdomain.local" value="${esc(c.server)}"></label>
+          <label class="f">User name <input type="text" name="user" placeholder="administrator@vsphere.local" value="${esc(c.user)}"></label>
+          <label class="f">Password <input type="password" name="password" placeholder="${c.hasPassword ? '(saved – leave blank to keep)' : ''}"></label>
+          <label class="c"><input type="checkbox" name="insecure" ${c.insecure ? 'checked' : ''}> Accept an untrusted (self-signed) certificate</label>
+        </fieldset>
+        <fieldset><legend>Windows inside the VMs <small style="font-weight:400;color:var(--muted)">(for guest stats and processes)</small></legend>
+          <label class="c"><input type="radio" name="guestMode" value="current" ${c.guestMode !== 'account' ? 'checked' : ''}> Use my Windows login <small>(domain-joined VMs)</small></label>
+          <label class="c"><input type="radio" name="guestMode" value="account" ${c.guestMode === 'account' ? 'checked' : ''}> Use this account:</label>
+          <div class="indent">
+            <label class="f">User name <input type="text" name="guestUser" placeholder="DOMAIN\\user or administrator" value="${esc(c.guestUser)}"></label>
+            <label class="f">Password <input type="password" name="guestPassword" placeholder="${c.hasGuestPassword ? '(saved – leave blank to keep)' : ''}"></label>
+          </div>
+        </fieldset>
+        <fieldset><legend>General</legend>
+          <label class="c"><input type="checkbox" name="startup" ${d.startup ? 'checked' : ''}> Start automatically when I sign in to Windows</label>
+        </fieldset>
+        <div class="status" id="status"></div>
+        <div class="buttons"><button type="button" class="link" id="log">Open log</button><button type="button" class="link" id="about" style="margin-left:12px">About</button><span class="spacer"></span>
+          <button type="button" class="b" data-close="1">Cancel</button>
+          <button type="submit" class="b primary" id="save">Save &amp; connect</button></div>
+      </form>`;
+    const f = document.getElementById('f');
+    const sync = () => {
+      const acct = f.guestMode.value === 'account';
+      f.guestUser.disabled = !acct;
+      f.guestPassword.disabled = !acct;
+    };
+    f.addEventListener('change', sync);
+    sync();
+    document.getElementById('log').onclick = () => cmd({ op: 'openLog' });
+    document.getElementById('about').onclick = () => cmd({ op: 'about' });
+    f.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const st = document.getElementById('status');
+      if (!f.server.value.trim() || !f.user.value.trim()) {
+        st.className = 'status err'; st.textContent = 'Enter the vCenter server and user name.'; return;
+      }
+      st.className = 'status'; st.textContent = 'Connecting to vCenter…';
+      document.getElementById('save').disabled = true;
+      cmd({ op: 'save', server: f.server.value.trim(), user: f.user.value.trim(), password: f.password.value,
+        insecure: f.insecure.checked, guestMode: f.guestMode.value, guestUser: f.guestUser.value.trim(),
+        guestPassword: f.guestPassword.value, startup: f.startup.checked });
+    });
+    setTimeout(() => { (c.server ? f.password : f.server).focus(); }, 50);
+    reportSize();
+  }
+
+  function saveResult(r) {
+    const st = document.getElementById('status');
+    const btn = document.getElementById('save');
+    if (!st) return;
+    btn.disabled = false;
+    st.className = `status ${r.ok ? 'ok' : 'err'}`;
+    st.textContent = r.message;
+    reportSize();
+    if (r.ok) setTimeout(() => cmd({ op: 'close' }), 1500);
+  }
+
+  // ---------------------------------------------------------------- about
+  function renderAbout(d) {
+    document.body.className = 'about'; document.documentElement.className = 'about';
+    const link = (u) => `<a data-url="${esc(u)}" title="${esc(u)}">${esc(u)}</a>`;
+    panel.innerHTML = `
+      <div class="atitle" data-drag="1"><img src="${d.icon}" alt=""><span>About ${esc(d.name)}</span>
+        <button class="aclose" data-close="1" aria-label="Close">✕</button></div>
+      <div class="abody">
+        <div class="atop"><img class="big" src="${d.icon}" alt="">
+          <div><div class="aname">${esc(d.name)}<span class="ver">${esc(d.version)}</span></div>
+            <div class="alic">This program is free and open source (MIT licence)</div></div>
+          <button class="aok" data-close="1" id="aok">OK</button></div>
+        <div class="agrid">
+          <div class="al">Written by</div><div>${esc(d.author)}</div>
+          <div class="al">Check for the latest version at:</div>${link(d.latest)}
+          <div class="al">Source code and help:</div>${link(d.repo)}
+          <div class="al">If it saves you time, support it at:</div>${link(d.support)}
+        </div>
+      </div>`;
+    setTimeout(() => { const b = document.getElementById('aok'); if (b) b.focus(); }, 50);
+    reportSize();
+  }
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest && e.target.closest('a[data-url]');
+    if (a) { e.preventDefault(); cmd({ op: 'openUrl', url: a.dataset.url }); }
+  });
+
+  // ---------------------------------------------------------------- shared events
+  document.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    if (e.target.closest('[data-close]')) return;
+    if (e.target.closest('[data-drag]')) { e.preventDefault(); cmd({ op: 'drag' }); }
+  });
+  document.addEventListener('click', (e) => { if (e.target.closest('[data-close]')) cmd({ op: 'close' }); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') cmd({ op: 'close' }); });
+  document.addEventListener('contextmenu', (e) => { if (!e.target.closest('input')) e.preventDefault(); });
+
+  window.vh = {
+    popup(s) { mode = 'popup'; renderPopup(s); },
+    settings(d) { mode = 'settings'; renderSettings(d); },
+    about(d) { mode = 'about'; renderAbout(d); },
+    saveResult,
+  };
+})();
+</script>
+</body></html>
