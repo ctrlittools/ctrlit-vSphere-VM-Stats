@@ -5,6 +5,8 @@ on:
     branches: [main]
     tags: ['v*']
   pull_request:
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -24,8 +26,8 @@ jobs:
         with:
           name: ctrlit-vSphere-VM-Stats
           path: dist/ctrlit-vSphere-VM-Stats.exe
-      - name: Attach to release (on version tags)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Attach to release (when a release is published or a v* tag is pushed)
+        if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: dist/ctrlit-vSphere-VM-Stats.exe

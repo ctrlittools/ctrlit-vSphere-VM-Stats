@@ -67,7 +67,7 @@ You need Go 1.24 or newer.
 
 Either way, the output is `dist/ctrlit-vSphere-VM-Stats.exe`. The tests run the vCenter code against govmomi's built-in vCenter and ESXi simulators, so no real vCenter or host is needed.
 
-GitHub Actions (`.github/workflows/build.yml`) builds on every push and uploads the `.exe` as an artifact. Pushing a tag like `v1.0.0` also attaches the `.exe` to a GitHub Release.
+GitHub Actions (`.github/workflows/build.yml`) builds on every push and uploads the `.exe` as an artifact. Publishing a GitHub Release (or pushing a tag like `v1.0.0`) builds the `.exe` and attaches it to the release automatically.
 
 ## Support
 
